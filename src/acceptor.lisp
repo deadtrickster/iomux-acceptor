@@ -1,6 +1,5 @@
 (in-package #:iomux-acceptor)
 
-;; mixin hunchentoot:easy-acceptor to use that dispatch framework
 (defclass iomux-acceptor (hunchentoot:acceptor)
   ()
   (:default-initargs
@@ -8,9 +7,18 @@
    :reply-class 'iomux-reply
    :taskmaster (make-instance 'hunchentoot:single-threaded-taskmaster)))
 
-;; mixin hunchentoot:easy-acceptor to use that dispatch framework
 (defmethod hunchentoot:acceptor-dispatch-request ((acceptor iomux-acceptor) request)
   (call-next-method))
+
+;; mixin hunchentoot:easy-acceptor to use that dispatch framework
+(defclass iomux-easy-acceptor (iomux-acceptor hunchentoot:easy-acceptor)
+  ())
+
+(defmethod hunchentoot:stop ((acceptor iomux-acceptor) &key soft)
+  (declare (ignore soft))
+  (setf (hunchentoot::acceptor-shutdown-p acceptor) t)
+  (hunchentoot:shutdown (hunchentoot::acceptor-taskmaster acceptor))
+  acceptor)
 
 (defun make-listen-handler (acceptor socket)
   (lambda (fd event exception)
@@ -38,6 +46,9 @@
 (defmethod hunchentoot:accept-connections ((acceptor iomux-acceptor))
   (loop
      (when (hunchentoot::acceptor-shutdown-p acceptor)
+       (let ((socket (hunchentoot::acceptor-listen-socket acceptor)))
+         (iomux:remove-fd-handlers *event-base* socket)
+         (close socket))
        (return))
      (iomux:event-dispatch *event-base* :one-shot t :timeout hunchentoot::+new-connection-wait-time+)))
 

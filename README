@@ -1,0 +1,72 @@
+IOMUX-ACCEPTOR
+(The Common Lisp web server formerly known as DAMMIT.)
+
+Evented IO for Hunchentoot.
+
+Provides an acceptor and related classes for Hunchentoot, using the
+multiplexed IO facilities provided by IOLIB.  The point, of course, is
+that thread-per-connection is too memory intensive for busy long-poll
+applications.
+
+Usage, the easy part:
+
+To get started, just use or subclass IOMUX-ACCEPTOR (or
+IOMUX-EASY-ACCEPTOR), using all the Hunchentoot APIs as you normally
+would.
+
+Usage, the not-so-easy part:
+
+In a traditional Hunchentoot application, the return value of your
+handler is the response that is sent to the client.  Using
+IOMUX-ACCEPTOR, the return value of your handler is irrelevant, and is
+ignored.  It is assumed that your application is asynchronous.  To
+actually send a reply to the client, call IOMUX-SEND-REPLY.
+
+Usage, advanced:
+
+The Hunchentoot APIs expect the presence of a certain number of
+dynamic variables in scope for each request.  If you're actually doing
+a Comet-style application, you'll be saving a closure (for a
+later, asynchronous reply) and the dynamic scope will either have
+changed or will no longer exist when that closure is called.  It is
+therefore necessary to save and restore the dynamic state along with
+your continuation.
+
+The easy way to accomplish this is through the use of SAFE-LAMBDA but
+if you want a little more control over the process the macros
+WITH-SAVED-SPECIALS and WITH-RESTORED-SPECIALS are there for you.
+
+I have not put any work into trying to make this play nicely with
+CL-CONT, but that may be a future enhancement.
+
+Warning:
+
+While taking advantage of evented IO does not require many *syntactic*
+changes to your code -- it is still, mostly, Hunchentoot -- using it
+effectively does require many *semantic* changes.  This is designed to
+support Comet and long-poll, with many requests that are mostly idle,
+and it is single threaded.  If your requests are busy or are doing
+other IO (e.g., talking to a database), then those long-running
+operations are going to block everything.
+
+You still have to design your application for Comet, this library only
+provides a few low-level tools to enable it.
+
+Hint:
+
+If you do need to do work in other threads (and you probably will),
+ZeroMQ is a good way to manage this.  The reason it is such a good
+match is that IOLIB provides a socket for the multiplexer (IOMUX:FD-OF
+*EVENT-BASE*) that can be passed to ZMQ's poll function.
+
+Basically, override ACCEPT-CONNECTIONS to do your ZMQ polling, ZMQ
+will let you know if there is any activity IOLIB needs to deal with,
+and then you can call IOMUX:EVENT-DISPATCH to take care of it.  Done.
+
+The best ZMQ library for Lisp is:
+
+https://github.com/galdor/lisp-zmq
+
+And this library provides a few convenience wrappers (YMMV):
+
+https://github.com/esessoms/zmq-muproc

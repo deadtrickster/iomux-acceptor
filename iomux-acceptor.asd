@@ -1,4 +1,6 @@
 (asdf:defsystem #:iomux-acceptor
+  :description "Evented IO for Hunchentoot."
+  :license "MIT"
   :depends-on (#:alexandria
                #:chunga
                #:flexi-streams
