@@ -33,6 +33,7 @@
     (hunchentoot:hunchentoot-error "acceptor ~A is already listening" acceptor))
   (let ((socket
          (sockets:make-socket :connect :passive
+                              :local-host "127.0.0.1"
                               :local-port (hunchentoot:acceptor-port acceptor)
                               :reuse-address t
                               :backlog (hunchentoot::acceptor-listen-backlog acceptor))))
@@ -55,7 +56,8 @@
 (defun make-connection-handler (acceptor socket)
   (let ((recv-buf (make-instance 'recv-buf)))
     (lambda (fd event exception)
-      (declare (ignore fd event exception))
+      (declare (ignore event exception))
+      (iomux:remove-fd-handlers *event-base* fd :read t)
       (recv-request-data
        socket recv-buf
        (lambda (headers-in method url-string protocol)
@@ -63,8 +65,9 @@
            (recv-content
             socket recv-buf content-length
             (lambda (content-stream)
-              (let ((hunchentoot:*reply* (make-instance (hunchentoot:acceptor-reply-class acceptor)))
-                    (hunchentoot:*session* nil))
+              (let ((hunchentoot:*acceptor* acceptor)
+                    (hunchentoot:*reply*    (make-instance (hunchentoot:acceptor-reply-class acceptor) :socket socket))
+                    (hunchentoot:*session*  nil))
                 (hunchentoot:process-request
                  (make-instance (hunchentoot:acceptor-request-class acceptor)
                                 :acceptor acceptor
@@ -80,7 +83,14 @@
   (iomux:set-io-handler *event-base*
                         (sockets:socket-os-fd socket)
                         :read
-                        (make-connection-handler acceptor socket)))
+                        (make-connection-handler acceptor socket))
+  (iomux:set-io-handler *event-base*
+                        (sockets:socket-os-fd socket)
+                        :error
+                        (lambda (fd event exception)
+                          (declare (ignore event exception))
+                          (iomux:remove-fd-handlers *event-base* fd)
+                          (close socket :abort t))))
 
 (defmethod hunchentoot:handle-request ((acceptor iomux-acceptor) (request iomux-request))
   (hunchentoot:acceptor-dispatch-request acceptor request))

@@ -55,9 +55,9 @@ provides a few low-level tools to enable it.
 Hint:
 
 If you do need to do work in other threads (and you probably will),
-ZeroMQ is a good way to manage this.  The reason it is such a good
-match is that IOLIB provides a socket for the multiplexer (IOMUX:FD-OF
-*EVENT-BASE*) that can be passed to ZMQ's poll function.
+ZeroMQ is a good way to coordinate this.  The reason it is such a good
+match is that IOLIB provides a socket for the multiplexer (IOMUX::FD-OF
+(IOMUX::MUX-OF *EVENT-BASE*)) that can be passed to ZMQ's poll function.
 
 Basically, override ACCEPT-CONNECTIONS to do your ZMQ polling, ZMQ
 will let you know if there is any activity IOLIB needs to deal with,

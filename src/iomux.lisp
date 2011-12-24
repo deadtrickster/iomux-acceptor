@@ -50,19 +50,22 @@
        (with-restored-specials
          ,@body))))
 
-;; use to end a series of continuations
-(defun done (&rest args)
-  (declare (ignore args))
-  nil)
-
 (defun send-bytes (socket bytes cont)
   (let ((sent 0))
     (labels ((self (fd event exception)
                (declare (ignore event exception))
-               (incf sent (sockets:send-to socket bytes :start sent :dont-wait t))
+               (handler-case
+                   (incf sent (sockets:send-to socket bytes :start sent :dont-wait t))
+                 ;; will generally be a hangup, but whatever...
+                 (condition (c)
+                   (done c)))
                (when (>= sent (length bytes))
-                 (iomux:remove-fd-handlers *event-base* fd :write t)
-                 (funcall cont))))
+                 (done)))
+             (done (&optional condition)
+               (iomux:remove-fd-handlers *event-base* (sockets:socket-os-fd socket) :write t)
+               (if condition
+                   (funcall cont condition)
+                   (funcall cont))))
       (iomux:set-io-handler *event-base* (sockets:socket-os-fd socket) :write #'self))))
 
 (defclass recv-buf ()
@@ -104,8 +107,9 @@
       (adjust-array buffer (+ (length buffer) num-bytes)))
     recv-buf))
 
+;; receive-from can throw end-of-file
 (defun recv-some (socket recv-buf &optional (num-bytes +page-size+))
-  (with-slots (buffer write)
+  (with-slots (buffer read write)
       (ensure-space recv-buf num-bytes)
     (multiple-value-bind (_ nbytes)
         (sockets:receive-from socket :buffer buffer :start write :dont-wait t)
@@ -117,29 +121,33 @@
   (declare (octets delimiter))
   (with-slots (buffer read write)
       recv-buf
-    (loop
-       with end = (- write (length delimiter))
-       for start = read then (1+ pos)
-       for pos = (position (aref delimiter 0) buffer :start start :end end)
-       while pos
-       thereis (and (loop
-                       for d across delimiter
-                       for p from pos
-                       always (= d (aref buffer p)))
-                    (- pos read)))))
+    (when (>= (- write read) (length delimiter))
+      (loop
+         with end = (1+ (- write (length delimiter)))
+         for start = read then (1+ pos)
+         for pos = (position (aref delimiter 0) buffer :start start :end end)
+         while pos
+         thereis (and (loop
+                         for d across delimiter
+                         for p from pos
+                         always (= d (aref buffer p)))
+                      (- pos read))))))
 
 (defun stream-to-delimiter (recv-buf delimiter)
   (declare (octets delimiter))
-  (if-let ((pos (position-of-delimiter recv-buf delimiter)))
-    (recv-stream recv-buf (+ pos (length delimiter)))
-    nil))
+  (when-let ((pos (position-of-delimiter recv-buf delimiter)))
+    (recv-stream recv-buf (+ pos (length delimiter)))))
 
 (defun recv-delimited (socket recv-buf delimiter cont)
   (declare (octets delimiter))
   (labels ((self (fd event exception)
              (declare (ignore event exception))
-             (recv-some socket recv-buf)
-             (when-let ((stream (stream-to-delimiter recv-buf delimiter)))
+             (handler-case
+                 (recv-some socket recv-buf)
+               (end-of-file ()
+                 nil))
+             (when-let ((stream (or (stream-to-delimiter recv-buf delimiter)
+                                    (recv-stream recv-buf))))
                (iomux:remove-fd-handlers *event-base* fd :read t)
                (funcall cont stream))))
     (if-let ((stream (stream-to-delimiter recv-buf delimiter)))
@@ -149,10 +157,16 @@
 (defun recv-line (socket recv-buf cont)
   (recv-delimited socket recv-buf hunchentoot::+crlf+ cont))
 
+;; TODO: end-of-file
 (defun recv-headers (socket recv-buf cont)
-  (recv-delimited socket recv-buf +crlf/crlf+ cont))
+  (let ((pos (position-of-delimiter recv-buf hunchentoot::+crlf+)))
+    (if (zerop pos)
+        (funcall cont (recv-stream recv-buf (length hunchentoot::+crlf+)))
+        (recv-delimited socket recv-buf +crlf/crlf+ cont))))
 
 (defun recv-content (socket recv-buf length cont)
+  (unless length
+    (setf length 0))
   (labels ((self (fd event exception)
              (declare (ignore event exception))
              (recv-some socket recv-buf (- length (recv-available recv-buf)))

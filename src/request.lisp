@@ -4,4 +4,5 @@
   ())
 
 (defmethod hunchentoot:process-request ((request iomux-request))
-  (hunchentoot:handle-request hunchentoot:*acceptor* request))
+  (let ((hunchentoot:*request* request))
+    (hunchentoot:handle-request hunchentoot:*acceptor* request)))
