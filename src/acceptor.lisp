@@ -1,7 +1,6 @@
 (in-package #:iomux-acceptor)
 
-(defclass iomux-acceptor (hunchentoot:acceptor)
-  ()
+(defclass iomux-acceptor (iolib-acceptor) ()
   (:default-initargs
    :request-class 'iomux-request
    :reply-class 'iomux-reply
@@ -10,61 +9,48 @@
 (defmethod hunchentoot:acceptor-dispatch-request ((acceptor iomux-acceptor) request)
   (call-next-method))
 
-;; mixin hunchentoot:easy-acceptor to use that dispatch framework
-(defclass iomux-easy-acceptor (iomux-acceptor hunchentoot:easy-acceptor)
-  ())
-
-(defmethod hunchentoot:stop ((acceptor iomux-acceptor) &key soft)
-  (declare (ignore soft))
-  (setf (hunchentoot::acceptor-shutdown-p acceptor) t)
-  (hunchentoot:shutdown (hunchentoot::acceptor-taskmaster acceptor))
-  acceptor)
-
 (defun make-listen-handler (acceptor socket)
   (lambda (fd event exception)
     (declare (ignore fd event exception))
-    (let ((client-connection
-           (sockets:accept-connection socket :wait t)))
+    (when-let ((client-connection (handler-case
+                                      (sockets:accept-connection socket :wait t)
+                                    (sockets:socket-connection-aborted-error ()))))
+      (hunchentoot::set-timeouts client-connection
+                                 (hunchentoot:acceptor-read-timeout acceptor)
+                                 (hunchentoot:acceptor-write-timeout acceptor))
       (hunchentoot:handle-incoming-connection
        (hunchentoot::acceptor-taskmaster acceptor) client-connection))))
 
-(defmethod hunchentoot:start-listening ((acceptor iomux-acceptor))
-  (when (hunchentoot::acceptor-listen-socket acceptor)
-    (hunchentoot:hunchentoot-error "acceptor ~A is already listening" acceptor))
-  (let ((socket
-         (sockets:make-socket :connect :passive
-                              :local-host "127.0.0.1"
-                              :local-port (hunchentoot:acceptor-port acceptor)
-                              :reuse-address t
-                              :backlog (hunchentoot::acceptor-listen-backlog acceptor))))
-    (setf (hunchentoot::acceptor-listen-socket acceptor) socket)
+(defmethod hunchentoot:start-listening :around ((acceptor iomux-acceptor))
+  (call-next-method)
+  (let ((listener (hunchentoot::acceptor-listen-socket acceptor)))
     (iomux:set-io-handler *event-base*
-                          (sockets:socket-os-fd socket)
+                          (sockets:socket-os-fd listener)
                           :read
-                          (make-listen-handler acceptor socket)))
+                          (make-listen-handler acceptor listener)))
   (values))
 
-(defmethod hunchentoot:accept-connections ((acceptor iomux-acceptor))
-  (loop
-     (when (hunchentoot::acceptor-shutdown-p acceptor)
-       (let ((socket (hunchentoot::acceptor-listen-socket acceptor)))
-         (iomux:remove-fd-handlers *event-base* socket)
-         (close socket))
-       (return))
-     (iomux:event-dispatch *event-base* :one-shot t :timeout hunchentoot::+new-connection-wait-time+)))
+(defmethod hunchentoot:accept-connections :around ((acceptor iomux-acceptor))
+  (let ((listener (hunchentoot::acceptor-listen-socket acceptor)))
+    (unwind-protect
+         (loop
+            (when (hunchentoot::acceptor-shutdown-p acceptor)
+              (return))
+            (iomux:event-dispatch *event-base* :one-shot t :timeout hunchentoot::+new-connection-wait-time+))
+      (iomux:remove-fd-handlers *event-base* (sockets:socket-os-fd listener))
+      (close listener))))
 
 (defun make-connection-handler (acceptor socket)
-  (let ((recv-buf (make-instance 'recv-buf)))
+  (let ((cnn (make-instance 'connection :socket socket)))
     (lambda (fd event exception)
       (declare (ignore event exception))
       (iomux:remove-fd-handlers *event-base* fd :read t)
-      (recv-request-data
-       socket recv-buf
-       (lambda (headers-in method url-string protocol)
-         (let ((content-length (cdr (assoc :content-length headers-in))))
-           (recv-content
-            socket recv-buf content-length
-            (lambda (content-stream)
+      (with-call/cc
+        (multiple-value-bind (headers-in method url-string protocol)
+            (recv-request-data cnn)
+          (let* ((content-length (cdr (assoc :content-length headers-in)))
+                 (content-stream (recv-content cnn content-length)))
+            (without-call/cc
               (let ((hunchentoot:*acceptor* acceptor)
                     (hunchentoot:*reply*    (make-instance (hunchentoot:acceptor-reply-class acceptor) :socket socket))
                     (hunchentoot:*session*  nil))
@@ -77,7 +63,7 @@
                                 :content-stream content-stream
                                 :method method
                                 :uri url-string
-                                :server-protocol protocol)))))))))))
+                                :server-protocol protocol))))))))))
 
 (defmethod hunchentoot:process-connection ((acceptor iomux-acceptor) (socket t))
   (iomux:set-io-handler *event-base*

@@ -15,14 +15,15 @@
       (ignore-errors
         (close socket)))))
 
-(defun iomux-send-reply (content &optional (cont (reply-done)))
-  (let ((hunchentoot::*hunchentoot-stream* (flex:make-in-memory-output-stream))
-        (hunchentoot::*headers-sent* nil)
-        (return-code (hunchentoot:return-code hunchentoot:*reply*)))
-    (hunchentoot::start-output
-     return-code
-     (or (hunchentoot:acceptor-status-message hunchentoot:*acceptor* return-code)
-         content))
-    (send-bytes (reply-socket hunchentoot:*reply*)
-                (flex:get-output-stream-sequence hunchentoot::*hunchentoot-stream*)
-                cont)))
+(defun/cc iomux-send-reply (content)
+  (let/cc cont
+    (let ((hunchentoot::*hunchentoot-stream* (flex:make-in-memory-output-stream))
+          (hunchentoot::*headers-sent* nil)
+          (return-code (hunchentoot:return-code hunchentoot:*reply*)))
+      (hunchentoot::start-output
+       return-code
+       (or (hunchentoot:acceptor-status-message hunchentoot:*acceptor* return-code)
+           content))
+      (with-call/cc
+        (send-bytes cnn (flex:get-output-stream-sequence hunchentoot::*hunchentoot-stream*)))
+      (funcall cont))))

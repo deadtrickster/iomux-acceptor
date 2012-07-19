@@ -1,11 +1,8 @@
 (asdf:defsystem #:iomux-acceptor
   :description "Evented IO for Hunchentoot."
   :license "MIT"
-  :depends-on (#:alexandria
-               #:chunga
-               #:flexi-streams
-               #:hunchentoot
-               #:iolib)
+  :depends-on (#:iolib-acceptor
+               #:protocol)
   :serial t
   :components
   ((:file "packages")

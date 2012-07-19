@@ -2,10 +2,13 @@
 
 (defpackage #:iomux-acceptor
   (:use #:alexandria
-        #:common-lisp)
+        #:cl-cont
+        #:common-lisp
+        #:iolib-acceptor
+        #:protocol
+        #:pack)
   (:export #:*event-base*
            #:iomux-acceptor
-           #:iomux-easy-acceptor
            #:iomux-send-reply
            #:reply-done
            #:reply-socket
