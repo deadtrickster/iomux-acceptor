@@ -1,9 +1,14 @@
 (in-package #:iomux-acceptor)
 
+(defun trivial-utf-8 (chars)
+  (map 'octets #'char-code chars))
+
+(define-constant +crlf+
+    (trivial-utf-8 '(#\Return #\Linefeed))
+  :test #'equalp)
+
 (define-constant +crlf/crlf+
-    (make-array 4
-                :element-type 'octet
-                :initial-contents (mapcar 'char-code '(#\Return #\Linefeed #\Return #\Linefeed)))
+    (trivial-utf-8 '(#\Return #\Linefeed #\Return #\Linefeed))
   :test #'equalp)
 
 ;; for your slime only
@@ -12,6 +17,7 @@
   (error "not implemented"))
 
 (defmacro with-saved-specials ((&rest specials) &body body)
+  "Use a lexical closure to bounce dynamic variables into a new context."
   (let ((specials (mapcar #'ensure-list specials))
         (inner (gensym "INNER")))
     (dolist (var '(hunchentoot:*acceptor*

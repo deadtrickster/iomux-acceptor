@@ -1,5 +1,7 @@
 (asdf:defsystem #:iomux-acceptor
   :description "Evented IO for Hunchentoot."
+  :version "0.2"
+  :author "Eric Sessoms <eric@nubgames.com>"
   :license "MIT"
   :depends-on (#:iolib-acceptor
                #:protocol)
