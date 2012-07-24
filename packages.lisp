@@ -1,6 +1,7 @@
 (in-package #:hunchentoot)
 
-(export '(+new-connection-wait-time+))
+(export '(+new-connection-wait-time+
+          start-output))
 
 (in-package #:common-lisp-user)
 

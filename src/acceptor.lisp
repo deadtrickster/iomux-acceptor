@@ -40,7 +40,7 @@
       (iomux:remove-fd-handlers *event-base* (sockets:socket-os-fd listener))
       (close listener))))
 
-(trace iomux:set-io-handler iomux:remove-fd-handlers iomux:event-dispatch)
+(trace iomux:set-io-handler iomux:remove-fd-handlers)
 
 (defun make-connection-handler (acceptor socket)
   (let ((cnn (make-instance 'connection :socket socket)))

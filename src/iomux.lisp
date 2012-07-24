@@ -1,7 +1,8 @@
 (in-package #:iomux-acceptor)
 
-(defun trivial-utf-8 (chars)
-  (map 'octets #'char-code chars))
+(eval-when (:compile-toplevel :load-toplevel)
+  (defun trivial-utf-8 (chars)
+    (map 'octets #'char-code chars)))
 
 (define-constant +crlf+
     (trivial-utf-8 '(#\Return #\Linefeed))
@@ -47,11 +48,11 @@
          ,@body))))
 
 (defun/cc recv-line (cnn)
-  (stream-to-delimited (recv-delimited cnn hunchentoot::+crlf+) hunchentoot::+crlf+))
+  (stream-to-delimiter (recv-delimited cnn hunchentoot::+crlf+) hunchentoot::+crlf+))
 
 ;; TODO: end-of-file
 (defun/cc recv-headers (cnn)
-  (stream-to-delimited (recv-delimited cnn +crlf/crlf+) +crlf/crlf+))
+  (stream-to-delimiter (recv-delimited cnn +crlf/crlf+) +crlf/crlf+))
 
 (defun/cc recv-content (cnn length)
   (unless length

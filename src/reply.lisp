@@ -22,19 +22,18 @@
     (setf (aref bytes pos) type)
     bytes))
 
-(defun %iomux-finish-reply ()
-  (let ((socket (-> hunchentoot:*reply* reply-connection connection-socket)))
+(defun %iomux-finish-reply (cnn)
+  (let ((socket (connection-socket cnn)))
     (ignore-errors
       (iomux:remove-fd-handlers *event-base* (sockets:socket-os-fd socket)))
     (close socket)))
 
-(defun/cc %iomux-start-reply (&optional content)
+(defun/cc %iomux-start-reply (cnn &optional content)
   (let ((hunchentoot::*hunchentoot-stream* (flex:make-in-memory-output-stream))
         (hunchentoot::*headers-sent* nil)
         (return-code (hunchentoot:return-code hunchentoot:*reply*)))
-    (hunchentoot::start-output return-code content)
-    (send-bytes (reply-connection hunchentoot:*reply*)
-                (flex:get-output-stream-sequence hunchentoot::*hunchentoot-stream*))))
+    (hunchentoot:start-output return-code content)
+    (send-bytes cnn (flex:get-output-stream-sequence hunchentoot::*hunchentoot-stream*))))
 
 (defun/cc iomux-send-chunk (&optional bytes)
   (send-bytes (reply-connection hunchentoot:*reply*)
@@ -60,14 +59,16 @@
     (apply #'format s fmt args)))
 
 (defun/cc iomux-finish-reply ()
-  (iomux-send-chunk)
-  (%iomux-finish-reply))
+  (let ((cnn (reply-connection hunchentoot:*reply*)))
+    (iomux-send-chunk)
+    (%iomux-finish-reply cnn)))
 
 (defun/cc iomux-start-reply ()
-  (%iomux-start-reply))
+  (%iomux-start-reply (reply-connection hunchentoot:*reply*)))
 
 (defun/cc iomux-send-reply (content)
-  (%iomux-start-reply content)
-  (%iomux-finish-reply))
+  (let ((cnn (reply-connection hunchentoot:*reply*)))
+    (%iomux-start-reply cnn content)
+    (%iomux-finish-reply cnn)))
 
-(trace %iomux-start-reply %iomux-finish-reply iomux-send-chunk)
+(trace iomux-start-reply iomux-send-reply iomux-finish-reply iomux-send-chunk)
