@@ -5,6 +5,9 @@
     :reader reply-connection
     :initarg :connection)))
 
+(defun reply-connection* (&optional (reply hunchentoot:*reply*))
+  (reply-connection reply))
+
 (defun utf-8 (string)
   (babel:string-to-octets string :encoding :utf-8))
 
@@ -19,8 +22,22 @@
          for byte across arg
          do (setf (aref bytes pos) byte
                   pos (1+ pos))))
-    (setf (aref bytes pos) type)
     bytes))
+
+(defun/cc %iomux-start-reply (&optional (content nil content-provided-p))
+  (let/cc cont
+    (let ((stream (flex:make-in-memory-output-stream)))
+      (let ((hunchentoot::*hunchentoot-stream* stream)
+            (hunchentoot::*headers-sent* nil)
+            (return-code (hunchentoot:return-code hunchentoot:*reply*)))
+        (if content-provided-p
+            (hunchentoot:start-output return-code content)
+            (hunchentoot:start-output return-code))
+        (let ((bytes (flex:get-output-stream-sequence stream)))
+          (cl-cont::funcall/cc 'send-bytes cont (reply-connection*) bytes))))))
+
+(defun/cc iomux-start-reply ()
+  (%iomux-start-reply))
 
 (defun %iomux-finish-reply (cnn)
   (let ((socket (connection-socket cnn)))
@@ -28,47 +45,36 @@
       (iomux:remove-fd-handlers *event-base* (sockets:socket-os-fd socket)))
     (close socket)))
 
-(defun/cc %iomux-start-reply (cnn &optional content)
-  (let ((hunchentoot::*hunchentoot-stream* (flex:make-in-memory-output-stream))
-        (hunchentoot::*headers-sent* nil)
-        (return-code (hunchentoot:return-code hunchentoot:*reply*)))
-    (hunchentoot:start-output return-code content)
-    (send-bytes cnn (flex:get-output-stream-sequence hunchentoot::*hunchentoot-stream*))))
+(defun/cc iomux-send-chunk (cnn &optional bytes)
+  (send-bytes cnn
+   (if (null bytes)
+       (trivial-utf-8 '(#\0 #\Return #\Linefeed #\Return #\Linefeed))
+       (let ((length (utf-8 (format nil "~X~C~C" (length bytes) #\Return #\Linefeed))))
+         (concat-bytes length bytes +crlf+)))))
 
-(defun/cc iomux-send-chunk (&optional bytes)
-  (send-bytes (reply-connection hunchentoot:*reply*)
-              (if (null bytes)
-                  (trivial-utf-8 '(#\0 #\Return #\Linefeed #\Return #\Linefeed))
-                  (let ((length (babel:string-to-octets
-                                 (format nil "~X~C~C" (length bytes) #\Return #\Linefeed))))
-                    (concat-bytes length bytes +crlf+)))))
+(defun/cc iomux-finish-reply (cnn)
+  (iomux-send-chunk cnn)
+  (%iomux-finish-reply cnn))
 
-(defun/cc iomux-send-concat (&rest args)
-  (iomux-send-chunk (apply #'concat-bytes args)))
+(defun/cc iomux-send-reply (&optional (content nil content-provided-p))
+  (let ((cnn (reply-connection*)))
+    (if content-provided-p
+        (%iomux-start-reply content)
+        (%iomux-start-reply))
+    (%iomux-finish-reply cnn)))
 
-(defun/cc iomux-send-utf-8 (string)
-  (iomux-send-chunk (utf-8 string)))
+(defun/cc iomux-send-concat (cnn &rest args)
+  (iomux-send-chunk cnn (apply #'concat-bytes args)))
 
-(defmacro iomux-send-stream ((stream) &body body)
-  `(iomux-send-utf-8
+(defun/cc iomux-send-utf-8 (cnn string)
+  (iomux-send-chunk cnn (utf-8 string)))
+
+(defmacro iomux-send-stream ((stream) cnn &body body)
+  `(iomux-send-utf-8 ,cnn
     (with-output-to-string (,stream)
       ,@body)))
 
-(defun/cc iomux-send-fmt (fmt &rest args)
+(defun/cc iomux-send-fmt (cnn fmt &rest args)
   (iomux-send-stream (s)
+      cnn
     (apply #'format s fmt args)))
-
-(defun/cc iomux-finish-reply ()
-  (let ((cnn (reply-connection hunchentoot:*reply*)))
-    (iomux-send-chunk)
-    (%iomux-finish-reply cnn)))
-
-(defun/cc iomux-start-reply ()
-  (%iomux-start-reply (reply-connection hunchentoot:*reply*)))
-
-(defun/cc iomux-send-reply (content)
-  (let ((cnn (reply-connection hunchentoot:*reply*)))
-    (%iomux-start-reply cnn content)
-    (%iomux-finish-reply cnn)))
-
-(trace iomux-start-reply iomux-send-reply iomux-finish-reply iomux-send-chunk)

@@ -40,8 +40,6 @@
       (iomux:remove-fd-handlers *event-base* (sockets:socket-os-fd listener))
       (close listener))))
 
-(trace iomux:set-io-handler iomux:remove-fd-handlers)
-
 (defun make-connection-handler (acceptor socket)
   (let ((cnn (make-instance 'connection :socket socket)))
     (lambda (fd event exception)
@@ -51,7 +49,7 @@
         (multiple-value-bind (headers-in method url-string protocol)
             (recv-request-data cnn)
           (let* ((content-length (cdr (assoc :content-length headers-in)))
-                 (content-stream (recv-content cnn content-length)))
+                 (content-stream (recv-content cnn (and content-length (parse-integer content-length)))))
             (without-call/cc
               (let ((hunchentoot:*acceptor* acceptor)
                     (hunchentoot:*reply*    (make-instance (hunchentoot:acceptor-reply-class acceptor) :connection cnn))
@@ -72,15 +70,15 @@
                         (sockets:socket-os-fd socket)
                         :read
                         (make-connection-handler acceptor socket))
-  (iomux:set-io-handler *event-base*
-                        (sockets:socket-os-fd socket)
-                        :error
-                        (lambda (fd event exception)
-                          (declare (ignore event exception))
-                          (iomux:remove-fd-handlers *event-base* fd)
-                          (close socket :abort t))))
+  (iomux:set-error-handler *event-base*
+                           (sockets:socket-os-fd socket)
+                           (lambda (fd event)
+                             (declare (ignore event))
+                             (iomux:remove-fd-handlers *event-base* fd)
+                             (close socket :abort t))))
 
 (defmethod hunchentoot:handle-request ((acceptor iomux-acceptor-mixin) (request iomux-request))
   (hunchentoot:acceptor-dispatch-request acceptor request))
 
-(trace hunchentoot:start-listening hunchentoot:accept-connections hunchentoot:process-connection hunchentoot:handle-request)
+(defun hunchentoot::input-chunking-p ()
+  nil)

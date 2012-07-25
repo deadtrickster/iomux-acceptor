@@ -1,9 +1,10 @@
 (in-package #:iomux-acceptor)
 
+;; dGhlIHNhbXBsZSBub25jZQ== -> s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
 (let ((guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
   (defun signature (key)
     (base64:usb8-array-to-base64-string
-     (ironclad:digest-sequence :sha1 (concatenate 'string key guid)))))
+     (ironclad:digest-sequence :sha1 (ironclad:ascii-string-to-byte-array (concatenate 'string key guid))))))
 
 (defun/cc websocket-handshake ()
   (let/cc cont
@@ -16,7 +17,7 @@
             (hunchentoot:header-out :upgrade) "websocket"
             (hunchentoot:header-out :sec-websocket-accept) (signature key)
             (hunchentoot:header-out :sec-websocket-protocol) protocol)
-      (funcall/cc 'iomux-start-reply cont))))
+      (cl-cont::funcall/cc 'iomux-start-reply cont))))
 
 ;;; Base Framing Protocol
 ;;;
@@ -61,17 +62,20 @@
 (defconstant +pong-frame+         10)
 
 (defun/cc websocket-recv-message (cnn)
-  (loop
-     with opcode = +continuation-frame+
-     for (values finp frame fragment) = (websocket-recv-frame cnn)
-     unless (= frame +continuation-frame+) do (setf opcode frame)
-     when data collect fragment into fragments
-     until finp
-     finally
-       (return
-         (values opcode
-                 (and fragments
-                      (apply #'concat-bytes fragments))))))
+  (let ((opcode +continuation-frame+)
+        (fragments nil))
+    (loop
+       (multiple-value-bind (finp frame fragment)
+           (websocket-recv-frame cnn)
+         (unless (= frame +continuation-frame+)
+           (setf opcode frame))
+         (when fragment
+           (push fragment fragments))
+         (when finp
+           (return-from websocket-recv-message
+             (values opcode
+                     (and fragments
+                          (apply #'concat-bytes (nreverse fragments))))))))))
 
 (defun/cc websocket-recv-frame (cnn)
   (with-recv (cnn)
@@ -79,20 +83,20 @@
     (let ((recipe nil)
           (length 0)
           (mask 0))
-      (without-call/cc
-        (when (= (len control) 126) (push :ushort recipe))
-        (when (= (len control) 127) (push :ulong  recipe))
-        (when (maskp control) (push :uint recipe))
-        (let ((values (recv-recipe cnn (nreverse recipe))))
-          (setf length (if (> (len control) 125) (pop values) (len control))
-                mask (if (maskp control) (pop values) 0))))
+      (declare ((unsigned-byte 32) mask))
+      (when (= (len control) 126) (push :ushort recipe))
+      (when (= (len control) 127) (push :ulong  recipe))
+      (when (maskp control) (push :uint recipe))
+      (let ((values (ensure-list (apply #'recv-unpack cnn (nreverse recipe)))))
+        (setf length (if (> (len control) 125) (pop values) (len control))
+              mask (if (maskp control) (pop values) 0)))
       (let ((data (when (plusp length)
                     (eat-to-expected (recv-fixed cnn length)))))
         (without-call/cc
-          (when maskp
+          (when (maskp control)
             (loop
                for i below (length data)
-               for j = (mod i 4)
+               for j = (- 3 (mod i 4))
                do (setf (aref data i)
                         (logxor (aref data i) (ldb (byte 8 (* j 8)) mask))))))
         (values (finp control) (opcode control) data)))))
@@ -102,20 +106,22 @@
     (let ((recipe nil)
           (control 0))
       (declare ((unsigned-byte 16) control))
-      (setf (finp control) finp
-            (opcode control) opcode)
+      (when finp
+        (setf (ldb (byte 1 15) control) 1))
+      (setf (opcode control) opcode)
       (when data
         (push data recipe)
         (let ((length (length data)))
           (cond
             ((> length 65535)
-             (push (:uchar :ulong) recipe)
+             (push '(:uchar :ulong) recipe)
              (setf (len control) 127))
             ((> length 125)
              (push '(:uchar :ushort) recipe)
              (setf (len control) 126))
             (t
+             (push '(:uchar *) recipe)
              (setf (len control) length)))))
       (push control recipe)
       (push :ushort recipe)
-      (apply/cc 'send cont cnn recipe))))
+      (cl-cont::apply/cc 'send cont cnn recipe))))
