@@ -36,7 +36,10 @@
          (loop
             (when (hunchentoot::acceptor-shutdown-p acceptor)
               (return))
-            (iomux:event-dispatch *event-base* :one-shot t :timeout hunchentoot:+new-connection-wait-time+))
+            (let ((timeout (iomux:exit-event-loop *event-base* :delay hunchentoot:+new-connection-wait-time+)))
+              (unwind-protect
+                   (iomux:event-dispatch *event-base* :one-shot t)
+                (iomux:remove-timer *event-base* timeout))))
       (iomux:remove-fd-handlers *event-base* (sockets:socket-os-fd listener))
       (close listener))))
 
