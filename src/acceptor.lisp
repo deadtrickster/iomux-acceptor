@@ -1,5 +1,10 @@
 (in-package #:iomux-acceptor)
 
+;; Anything that wants to stay alive needs to heartbeat at least every
+;; 30 seconds or risk getting cut-off by an intermediary anyway.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (setf hunchentoot:*default-connection-timeout* 30))
+
 (defclass iomux-acceptor-mixin (iolib-acceptor-mixin) ()
   (:default-initargs
    :request-class 'iomux-request
@@ -36,10 +41,12 @@
          (loop
             (when (hunchentoot::acceptor-shutdown-p acceptor)
               (return))
-            (let ((timeout (iomux:exit-event-loop *event-base* :delay hunchentoot:+new-connection-wait-time+)))
-              (unwind-protect
-                   (iomux:event-dispatch *event-base* :one-shot t)
-                (iomux:remove-timer *event-base* timeout))))
+            (handler-case
+                (let ((timeout (iomux:exit-event-loop *event-base* :delay hunchentoot:+new-connection-wait-time+)))
+                  (unwind-protect
+                       (iomux:event-dispatch *event-base* :one-shot t)
+                    (iomux:remove-timer *event-base* timeout)))
+              (sockets:socket-connection-reset-error ())))
       (iomux:remove-fd-handlers *event-base* (sockets:socket-os-fd listener))
       (close listener))))
 

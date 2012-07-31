@@ -12,6 +12,7 @@
         (mapcar #'hunchentoot:header-in*
                 '(:connection :upgrade :sec-websocket-key :sec-websocket-version :sec-websocket-protocol))
       (declare (ignore connection upgrade version))
+      (deletef (slot-value hunchentoot:*reply* 'hunchentoot:headers-out) :content-type :key #'car :test #'eq)
       (setf (hunchentoot:return-code*) hunchentoot:+http-switching-protocols+
             (hunchentoot:header-out :connection) "Upgrade"
             (hunchentoot:header-out :upgrade) "websocket"
