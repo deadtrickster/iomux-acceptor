@@ -7,14 +7,14 @@
                #:iolib-acceptor
                #:ironclad
                #:protocol)
-  :serial t
   :components
-  ((:file "packages")
-   (:module :src
+  ((:module :main
+            :pathname "src/main/common-lisp"
             :components
             ((:file "acceptor"  :depends-on ("headers" "request"))
              (:file "headers"   :depends-on ("iomux"))
-             (:file "iomux")
+             (:file "iomux"     :depends-on ("packages"))
+             (:file "packages")
              (:file "reply"     :depends-on ("iomux"))
              (:file "request"   :depends-on ("reply"))
              (:file "websocket" :depends-on ("headers" "request"))))))
