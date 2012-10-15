@@ -2,8 +2,7 @@
 
 ;; Anything that wants to stay alive needs to heartbeat at least every
 ;; 30 seconds or risk getting cut-off by an intermediary anyway.
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (setf hunchentoot:*default-connection-timeout* 30))
+(setf hunchentoot:*default-connection-timeout* 30)
 
 (defclass iomux-acceptor-mixin (iolib-acceptor-mixin) ()
   (:default-initargs
